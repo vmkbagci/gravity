@@ -1,0 +1,10 @@
+<div class="game-container">
+  <canvas #gameCanvas></canvas>
+  <div class="game-ui">
+    <div class="timer">Time: {{ timer$ | async }}s</div>
+    <div class="score">Score: {{ score$ | async }}</div>
+    <div class="controls">
+      <p>Q: Brake | W: Magnetize | Click: Gravity Bomb | S: Pause</p>
+    </div>
+  </div>
+</div>
