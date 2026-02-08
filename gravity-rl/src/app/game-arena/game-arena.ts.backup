@@ -56,17 +56,6 @@ export class GameArenaComponent implements OnInit, OnDestroy {
   private gameOver: boolean = false;
   private finalScore: number = 0;
   
-  // Slider multipliers
-  public velocityMultiplier: number = 1.0;
-  public physicsSpeedMultiplier: number = 1.0;
-  public magneticForceMultiplier: number = 1.0;
-  public gravityMinesMultiplier: number = 1.0;
-  
-  // Base values for calculations
-  private readonly BASE_VELOCITY = 2.5;
-  private readonly BASE_MAGNETIZE_STRENGTH = 0.75;
-  private readonly BASE_GRAVITY_BOMB_STRENGTH = 2250; // 1000x stronger for visible effect
-  
   // Eating animation state
   private isEatingAnimation: boolean = false;
   private eatingAnimationProgress: number = 0;
@@ -146,7 +135,7 @@ export class GameArenaComponent implements OnInit, OnDestroy {
     magnetizeRadius: 120,
     magnetizeStrength: 0.75,
     gravityBombDuration: 3,
-    gravityBombStrength: 1875, // 1000x stronger for visible effect
+    gravityBombStrength: 0.1875, // Quarter of magnetize strength (0.75 / 4)
   };
   
   // Skill charge configuration
@@ -273,8 +262,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       label: 'player',
     });
     // Give player a random initial velocity (slower)
-    const playerVx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
-    const playerVy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+    const playerVx = (Math.random() - 0.5) * 2.5;
+    const playerVy = (Math.random() - 0.5) * 2.5;
     Matter.Body.setVelocity(playerBall, { x: playerVx, y: playerVy });
     
     // Create target ball with random position and velocity
@@ -290,8 +279,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       label: 'target',
     });
     // Give target a random initial velocity (slower)
-    const targetVx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
-    const targetVy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+    const targetVx = (Math.random() - 0.5) * 2.5;
+    const targetVy = (Math.random() - 0.5) * 2.5;
     Matter.Body.setVelocity(targetBall, { x: targetVx, y: targetVy });
     
     // Create N obstacle balls with random positions and velocities
@@ -310,8 +299,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
         label: 'obstacle',
       });
       // Give each obstacle a random initial velocity (slower)
-      const vx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
-      const vy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+      const vx = (Math.random() - 0.5) * 2.5;
+      const vy = (Math.random() - 0.5) * 2.5;
       Matter.Body.setVelocity(obstacleBall, { x: vx, y: vy });
     }
     
@@ -481,7 +470,7 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       // Update physics with frame skipping for brake slow-motion
       if (brakeIsActive) {
         // Accumulate time and only update physics when we've accumulated enough
-        this.brakePhysicsAccumulator += deltaTime * this.physicsSpeedMultiplier;
+        this.brakePhysicsAccumulator += deltaTime;
         const physicsFrameTime = 1 / 60; // 60 FPS
         const slowedFrameTime = physicsFrameTime / this.BRAKE_TIME_SCALE;
         
@@ -518,11 +507,7 @@ export class GameArenaComponent implements OnInit, OnDestroy {
         // Normal physics update every frame
         this.brakePhysicsAccumulator = 0;
         this.previousPhysicsState.clear();
-        // Apply physics speed multiplier by running multiple updates
-        const updatesPerFrame = Math.round(this.physicsSpeedMultiplier);
-        for (let i = 0; i < updatesPerFrame; i++) {
-          this.physics.update();
-        }
+        this.physics.update();
         
         // Clear interpolation flags
         const allBodies = this.physics.getBodies();
@@ -540,6 +525,18 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       const allBodies = this.physics.getBodies();
       const bombUpdateResult = this.skills.updateGravityBombs(allBodies);
       this.gravityBombAffectedBalls = bombUpdateResult.affectedBallsMap;
+      
+      // Handle bombs that need to be removed (too close to balls)
+      for (const bombSensor of bombUpdateResult.bombsToRemove) {
+        // Add poof effect at bomb position
+        this.poofEffects.push({
+          x: bombSensor.position.x,
+          y: bombSensor.position.y,
+          progress: 0
+        });
+        // Remove the bomb
+        this.skills.removeGravityBomb(bombSensor);
+      }
       
       // Handle expired bombs (also show poof)
       const expiredBombs = this.skills.cleanupExpiredBombs();
@@ -1145,8 +1142,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       color: '#ff0000',
       label: 'obstacle',
     });
-    const vx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier; // Slower velocity
-    const vy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+    const vx = (Math.random() - 0.5) * 2.5; // Slower velocity
+    const vy = (Math.random() - 0.5) * 2.5;
     Matter.Body.setVelocity(obstacleBall, { x: vx, y: vy });
   }
   
@@ -1247,8 +1244,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       color: '#ffff00', // Yellow for target
       label: 'target',
     });
-    const targetVx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
-    const targetVy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+    const targetVx = (Math.random() - 0.5) * 2.5;
+    const targetVy = (Math.random() - 0.5) * 2.5;
     Matter.Body.setVelocity(targetBall, { x: targetVx, y: targetVy });
     
     this.isSpawningAnimation = true;
@@ -1317,8 +1314,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       color: '#ffff00', // Yellow for target
       label: 'target',
     });
-    const targetVx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
-    const targetVy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+    const targetVx = (Math.random() - 0.5) * 2.5;
+    const targetVy = (Math.random() - 0.5) * 2.5;
     Matter.Body.setVelocity(targetBall, { x: targetVx, y: targetVy });
     
     // Update game state
@@ -1356,8 +1353,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       color: '#00ff00',
       label: 'player',
     });
-    const playerVx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
-    const playerVy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+    const playerVx = (Math.random() - 0.5) * 2.5;
+    const playerVy = (Math.random() - 0.5) * 2.5;
     Matter.Body.setVelocity(playerBall, { x: playerVx, y: playerVy });
     
     // Recreate target ball at random position with random velocity
@@ -1372,8 +1369,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
       color: '#ffff00',
       label: 'target',
     });
-    const targetVx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
-    const targetVy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+    const targetVx = (Math.random() - 0.5) * 2.5;
+    const targetVy = (Math.random() - 0.5) * 2.5;
     Matter.Body.setVelocity(targetBall, { x: targetVx, y: targetVy });
     
     // Recreate N obstacle balls at random positions with random velocities
@@ -1390,8 +1387,8 @@ export class GameArenaComponent implements OnInit, OnDestroy {
         color: '#ff0000',
         label: 'obstacle',
       });
-      const vx = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
-      const vy = (Math.random() - 0.5) * this.BASE_VELOCITY * this.velocityMultiplier;
+      const vx = (Math.random() - 0.5) * 2.5;
+      const vy = (Math.random() - 0.5) * 2.5;
       Matter.Body.setVelocity(obstacleBall, { x: vx, y: vy });
     }
     
@@ -1423,37 +1420,6 @@ export class GameArenaComponent implements OnInit, OnDestroy {
   /**
    * Setup input handlers for keyboard and mouse
    */
-  /**
-   * Slider event handlers
-   */
-  public onVelocityChange(event: Event): void {
-    const target = event.target as HTMLInputElement;
-    this.velocityMultiplier = parseFloat(target.value);
-  }
-  
-  public onPhysicsSpeedChange(event: Event): void {
-    const target = event.target as HTMLInputElement;
-    this.physicsSpeedMultiplier = parseFloat(target.value);
-  }
-  
-  public onMagneticForceChange(event: Event): void {
-    const target = event.target as HTMLInputElement;
-    this.magneticForceMultiplier = parseFloat(target.value);
-    // Update skills service with new magnetize strength
-    this.skills.setConfig({
-      magnetizeStrength: this.BASE_MAGNETIZE_STRENGTH * this.magneticForceMultiplier
-    });
-  }
-  
-  public onGravityMinesChange(event: Event): void {
-    const target = event.target as HTMLInputElement;
-    this.gravityMinesMultiplier = parseFloat(target.value);
-    // Update skills service with new gravity bomb strength
-    this.skills.setConfig({
-      gravityBombStrength: this.BASE_GRAVITY_BOMB_STRENGTH * this.gravityMinesMultiplier
-    });
-  }
-  
   private setupInputHandlers(): void {
     const canvas = this.canvasRef.nativeElement;
     

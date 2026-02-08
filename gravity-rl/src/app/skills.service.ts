@@ -141,24 +141,21 @@ export class SkillsService {
 
   /**
    * Create a gravity bomb at the specified position
+   * Gravity bombs are static (don't move) and only bend ball trajectories
    * @param position The position to create the gravity bomb
    * @returns The created gravity bomb
    */
   createGravityBomb(position: Matter.Vector): GravityBomb {
     const radius = this.config.gravityBombRadius || 7.5;
     
-    // Create a sensor body that detects collisions but doesn't respond physically
+    // Create a static sensor body that doesn't move or collide
     const sensor = Matter.Bodies.circle(position.x, position.y, radius, {
-      isSensor: true, // Sensor mode - detects collisions but no physical response
-      isStatic: false, // Can move
-      mass: 2, // Same mass as obstacles
-      restitution: 1.0, // Perfectly elastic (for wall collisions)
-      friction: 0.0,
-      frictionAir: 0.0,
+      isSensor: true, // Sensor mode - no physical collisions
+      isStatic: true, // Static - doesn't move
       label: 'gravity-bomb',
       collisionFilter: {
         category: 0x0002, // Gravity bomb category
-        mask: 0x0001 | 0x0004, // Collide with walls (0x0001) and balls (0x0004)
+        mask: 0x0000, // Don't collide with anything
       },
       render: {
         fillStyle: '#ff00ff',
@@ -170,7 +167,7 @@ export class SkillsService {
 
     // Create gravity bomb object
     const bomb: GravityBomb = {
-      position: sensor.position, // Use body's position (will update as it moves)
+      position: sensor.position, // Static position
       createdAt: Date.now(),
       duration: this.config.gravityBombDuration * 1000, // Convert to milliseconds
       sensor,
@@ -183,22 +180,19 @@ export class SkillsService {
 
   /**
    * Update all active gravity bombs and apply forces to balls
+   * Gravity bombs only bend trajectories - they conserve kinetic energy
    * @param allBodies All bodies in the physics world
-   * @returns Map of bomb IDs to arrays of affected balls, and array of bombs to remove
+   * @returns Map of bomb IDs to arrays of affected balls
    */
-  updateGravityBombs(allBodies: Matter.Body[]): { affectedBallsMap: Map<number, Array<{ body: Matter.Body; forceMagnitude: number; distance: number }>>; bombsToRemove: Matter.Body[] } {
+  updateGravityBombs(allBodies: Matter.Body[]): { affectedBallsMap: Map<number, Array<{ body: Matter.Body; forceMagnitude: number; distance: number }>> } {
     const G = this.config.gravityBombStrength;
     const effectRadius = this.config.gravityBombEffectRadius || 80;
-    const mineRadius = this.config.gravityBombRadius || 7.5;
     const affectedBallsMap = new Map<number, Array<{ body: Matter.Body; forceMagnitude: number; distance: number }>>();
-    const bombsToRemove: Matter.Body[] = [];
 
     for (const bomb of this.gravityBombs) {
-      // Update bomb position from its body (it moves now)
-      bomb.position = bomb.sensor.position;
+      // Bomb position is static (doesn't change)
       
       const affectedBalls: Array<{ body: Matter.Body; forceMagnitude: number; distance: number }> = [];
-      let shouldRemoveBomb = false;
       
       // Apply attractive force to all balls within radius
       for (const body of allBodies) {
@@ -218,44 +212,58 @@ export class SkillsService {
           continue;
         }
         
-        // Safety check: if mine is too close to any ball, mark for removal
-        const ballRadius = body.circleRadius || 15;
-        const safetyThreshold = (mineRadius + ballRadius) * 1.5;
-        if (distance < safetyThreshold) {
-          shouldRemoveBomb = true;
-          bombsToRemove.push(bomb.sensor);
-          break; // No need to check other balls
-        }
-        
         // Check if body is within effect radius
         if (distance > effectRadius) {
           continue;
         }
 
-        // Calculate attractive force using inverse-square law (mass-independent like magnetize)
+        // Store original velocity before applying force
+        const vx = body.velocity.x;
+        const vy = body.velocity.y;
+        const vSquared = vx * vx + vy * vy; // V^2 = Vx^2 + Vy^2
+        const vOriginal = Math.sqrt(vSquared);
+
+        // Calculate attractive force using inverse-square law (mass-independent)
         const forceMagnitude = G / distanceSquared;
 
         // Calculate force direction (toward bomb)
         const forceX = (dx / distance) * forceMagnitude;
         const forceY = (dy / distance) * forceMagnitude;
 
-        // Apply force to the body (toward bomb)
-        this.physics.applyForce(body, { x: forceX, y: forceY });
+        // Calculate what the new velocity WOULD BE after applying force
+        // In Matter.js, force is applied as: velocity += force / mass * deltaTime
+        // We use deltaTime = 1/60 (one physics step at 60 FPS)
+        const deltaTime = 1 / 60;
+        const mass = body.mass;
+        const vxPrime = vx + (forceX / mass) * deltaTime;
+        const vyPrime = vy + (forceY / mass) * deltaTime;
+        const vPrimeSquared = vxPrime * vxPrime + vyPrime * vyPrime; // V'^2 = Vx'^2 + Vy'^2
+        const vPrime = Math.sqrt(vPrimeSquared);
         
-        // Apply equal and opposite force to bomb (Newton's third law)
-        this.physics.applyForce(bomb.sensor, { x: -forceX, y: -forceY });
+        // Conserve kinetic energy by normalizing velocity
+        // We need: Vx'' = a * Vx' and Vy'' = a * Vy'
+        // where a = sqrt(V^2 / V'^2)
+        if (vPrimeSquared > 0.0001) { // Avoid division by zero
+          const alpha = Math.sqrt(vSquared / vPrimeSquared);
+          const vxDoublePrime = alpha * vxPrime;
+          const vyDoublePrime = alpha * vyPrime;
+          
+          // Set the energy-conserved velocity directly (bypass force accumulator)
+          Matter.Body.setVelocity(body, { x: vxDoublePrime, y: vyDoublePrime });
+        } else {
+          // If velocity would be near zero, just keep original velocity
+          // (this handles edge cases where ball is stationary)
+          Matter.Body.setVelocity(body, { x: vx, y: vy });
+        }
         
         // Track affected ball
         affectedBalls.push({ body, forceMagnitude, distance });
       }
       
-      // Only add to affected balls map if bomb is not being removed
-      if (!shouldRemoveBomb) {
-        affectedBallsMap.set(bomb.sensor.id, affectedBalls);
-      }
+      affectedBallsMap.set(bomb.sensor.id, affectedBalls);
     }
     
-    return { affectedBallsMap, bombsToRemove };
+    return { affectedBallsMap };
   }
 
   /**
